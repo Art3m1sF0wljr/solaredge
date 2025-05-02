@@ -1,7 +1,13 @@
 import socket
 import struct
 import time
+from datetime import datetime
 from collections import OrderedDict
+import re
+
+# Database configuration
+DB_FILE = "solar_edge_data.log"
+LOG_INTERVAL = 60  # seconds
 
 class SolarEdgeModbusReader:
     def __init__(self, host, port=1502, timeout=20, unit_id=1):
@@ -246,9 +252,19 @@ def format_value(name, value, unit=None):
         return f"{value} {unit}"
     return str(value)
 
-if __name__ == "__main__":
-    print("SolarEdge Modbus Reader")
-    print("----------------------")
+def save_to_database(data):
+    """Append data to the database text file."""
+    with open(DB_FILE, 'a') as f:
+        f.write(f"{data['timestamp']}, "
+                f"AC Power: {data['ac_power']} W, "
+                f"DC Power: {data['dc_power']} W, "
+                f"State: {data['state']}, "
+                f"Energy: {data['energy']} MWh\n")
+
+def main():
+    print("SolarEdge Modbus Reader with Auto-Logging")
+    print("---------------------------------------")
+    print(f"Data will be logged to {DB_FILE} every {LOG_INTERVAL} seconds\n")
 
     # Configuration
     inverter_ip = "192.168.8.218"
@@ -258,35 +274,65 @@ if __name__ == "__main__":
     reader = SolarEdgeModbusReader(inverter_ip, port=modbus_port, unit_id=unit_id)
 
     try:
-        print("Reading inverter data...")
-        start_time = time.time()
-        data = reader.read_all()
-        elapsed = time.time() - start_time
+        while True:
+            print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Reading data...")
+            start_time = time.time()
+            data = reader.read_all()
+            elapsed = time.time() - start_time
 
-        print("\n=== Inverter Information ===")
-        print(f"Manufacturer: {data.get('C_Manufacturer', 'N/A')}")
-        print(f"Model:        {data.get('C_Model', 'N/A')}")
-        print(f"Version:      {data.get('C_Version', 'N/A')}")
-        print(f"Serial:       {data.get('C_SerialNumber', 'N/A')}")
+            # Display results
+            print("\n=== Inverter Information ===")
+            print(f"Manufacturer: {data.get('C_Manufacturer', 'N/A')}")
+            print(f"Model:        {data.get('C_Model', 'N/A')}")
+            print(f"Version:      {data.get('C_Version', 'N/A')}")
+            print(f"Serial:       {data.get('C_SerialNumber', 'N/A')}")
 
-        print("\n=== AC Measurements ===")
-        print(f"Power:        {format_value('Power', data.get('I_AC_Power'))}")
-        print(f"Voltage (A-N): {format_value('I_AC_VoltageAN', data.get('I_AC_VoltageAN'))}")
-        print(f"Voltage (A-B): {format_value('I_AC_VoltageAB', data.get('I_AC_VoltageAB'))}")
-        print(f"Current:      {format_value('Current', data.get('I_AC_Current'))}")
-        print(f"Frequency:    {format_value('I_AC_Frequency', data.get('I_AC_Frequency'))}")
-        print(f"Energy:       {format_value('Energy', data.get('I_AC_Energy_WH'))}")
+            print("\n=== AC Measurements ===")
+            ac_power = data.get('I_AC_Power')
+            print(f"Power:        {format_value('Power', ac_power)}")
+            print(f"Voltage (A-N): {format_value('I_AC_VoltageAN', data.get('I_AC_VoltageAN'))}")
+            print(f"Voltage (A-B): {format_value('I_AC_VoltageAB', data.get('I_AC_VoltageAB'))}")
+            print(f"Current:      {format_value('Current', data.get('I_AC_Current'))}")
+            print(f"Frequency:    {format_value('I_AC_Frequency', data.get('I_AC_Frequency'))}")
+            energy = data.get('I_AC_Energy_WH')
+            print(f"Energy:       {format_value('Energy', energy)}")
 
-        print("\n=== DC Measurements ===")
-        print(f"Power:        {format_value('Power', data.get('I_DC_Power'))}")
-        print(f"Voltage:      {format_value('Voltage', data.get('I_DC_Voltage'))}")
-        print(f"Current:      {format_value('Current', data.get('I_DC_Current'))}")
+            print("\n=== DC Measurements ===")
+            dc_power = data.get('I_DC_Power')
+            print(f"Power:        {format_value('Power', dc_power)}")
+            print(f"Voltage:      {format_value('Voltage', data.get('I_DC_Voltage'))}")
+            print(f"Current:      {format_value('Current', data.get('I_DC_Current'))}")
 
-        print("\n=== Status ===")
-        print(f"State:        {data.get('I_Status_Description', 'N/A')}")
-        print(f"Heat Sink:    {format_value('I_Temp_Sink', data.get('I_Temp_Sink'))}")
+            print("\n=== Status ===")
+            state = data.get('I_Status_Description', 'N/A')
+            print(f"State:        {state}")
+            print(f"Heat Sink:    {format_value('I_Temp_Sink', data.get('I_Temp_Sink'))}")
 
-        print(f"\nData read completed in {elapsed:.1f} seconds")
+            print(f"\nData read completed in {elapsed:.1f} seconds")
 
+            # Prepare data for logging
+            log_data = {
+                'timestamp': datetime.now().isoformat(),
+                'ac_power': ac_power if ac_power is not None else 0.0,
+                'dc_power': dc_power if dc_power is not None else 0.0,
+                'state': state,
+                'energy': energy / 1000000 if energy is not None else 0.0  # Convert to MWh
+            }
+
+            # Save to database
+            save_to_database(log_data)
+            print(f"\n[{log_data['timestamp']}] Data logged successfully")
+
+            # Wait for next reading
+            if LOG_INTERVAL > elapsed:
+                remaining = LOG_INTERVAL - elapsed
+                print(f"\nWaiting for next reading in {remaining:.1f} seconds...")
+                time.sleep(remaining)
+
+    except KeyboardInterrupt:
+        print("\n\nSolarEdge Modbus Reader stopped.")
     except Exception as e:
-        print(f"Fatal error: {str(e)}")
+        print(f"\nFatal error: {str(e)}")
+
+if __name__ == "__main__":
+    main()
