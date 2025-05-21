@@ -3,10 +3,9 @@ import struct
 import time
 from datetime import datetime
 from collections import OrderedDict
-import re
 
 # Database configuration
-DB_FILE = "solar_edge_data.log"
+DB_FILE = "/home/pi/program/solaredge/solar_edge_data.log"
 LOG_INTERVAL = 60  # seconds
 
 class SolarEdgeModbusReader:
@@ -17,7 +16,7 @@ class SolarEdgeModbusReader:
         self.unit_id = unit_id
         self.delay_between_requests = 0.5  # seconds
 
-        # Register definitions with scale factors
+        # Register definitions with scale factors - updated with correct types
         self.registers = OrderedDict([
             # Identification
             (40000, {'name': 'C_SunSpec_ID', 'type': 'string', 'length': 2}),
@@ -38,7 +37,7 @@ class SolarEdgeModbusReader:
             (40085, {'name': 'I_AC_Frequency', 'type': 'uint16', 'sf': 40086, 'invalid': 0xFFFF}),
             (40086, {'name': 'I_AC_Frequency_SF', 'type': 'int16'}),
             (40093, {'name': 'I_AC_Energy_WH', 'type': 'acc32', 'sf': 40095}),
-            (40095, {'name': 'I_AC_Energy_WH_SF', 'type': 'int16'}),
+            (40095, {'name': 'I_AC_Energy_WH_SF', 'type': 'uint16'}),
 
             # DC Measurements
             (40096, {'name': 'I_DC_Current', 'type': 'uint16', 'sf': 40097, 'invalid': 0xFFFF}),
@@ -139,11 +138,19 @@ class SolarEdgeModbusReader:
         bytes_data = b''.join(struct.pack('>H', val) for val in values)
         return bytes_data[:length].decode('ascii', errors='ignore').strip('\x00')
 
+    def _validate_scale_factor(self, sf):
+        """Validate scale factor is within reasonable bounds"""
+        if sf is None:
+            return 0
+        if sf < -5 or sf > 5:  # SolarEdge typically uses -3 to +3
+            print(f"Warning: Unusual scale factor {sf}, defaulting to 0")
+            return 0
+        return sf
+
     def _apply_scale_factor(self, value, scale_factor):
-        """Apply scale factor to raw value"""
-        if scale_factor is None:
-            return value
-        return value * (10 ** scale_factor)
+        """Apply scale factor to raw value with validation"""
+        sf = self._validate_scale_factor(scale_factor)
+        return value * (10 ** sf)
 
     def _is_valid_value(self, reg_info, value):
         """Check if value is valid (not the 'invalid' marker)"""
@@ -154,28 +161,36 @@ class SolarEdgeModbusReader:
                 return False
         return True
 
+    def _get_scale_factor(self, reg_info):
+        """Get the current scale factor for a register"""
+        if 'sf' not in reg_info:
+            return None
+
+        sf_addr = reg_info['sf']
+        sf_reg = self.registers.get(sf_addr)
+        if not sf_reg:
+            return None
+
+        try:
+            values = self._read_registers(sf_addr, 1)
+            sf = values[0]
+
+            # Handle signed scale factors
+            if sf_reg['type'] == 'int16' and sf > 32767:
+                sf = sf - 65536
+
+            return sf
+        except Exception as e:
+            print(f"Warning: Could not read scale factor {sf_reg['name']}: {str(e)}")
+            return None
+
     def read_all(self):
         """Read all registers with proper scaling and error handling"""
         results = {}
-        scale_factors = {}
 
-        # First pass to collect scale factors
         for addr, reg_info in self.registers.items():
             if reg_info['type'].endswith('_SF'):
-                try:
-                    values = self._read_registers(addr, 1)
-                    scale_factors[addr] = values[0]
-                    # Handle signed scale factors
-                    if reg_info['type'].startswith('int') and values[0] > 32767:
-                        scale_factors[addr] = values[0] - 65536
-                except Exception as e:
-                    print(f"Warning: Could not read scale factor {reg_info['name']}: {str(e)}")
-                    scale_factors[addr] = 0
-
-        # Second pass to read all registers
-        for addr, reg_info in self.registers.items():
-            if reg_info['type'].endswith('_SF'):
-                continue  # We already read these
+                continue  # Skip scale factor registers - we'll read them when needed
 
             try:
                 if reg_info['type'] == 'string':
@@ -186,7 +201,9 @@ class SolarEdgeModbusReader:
                     # Read 2 registers for 32-bit value
                     values = self._read_registers(addr, 2)
                     raw_value = (values[0] << 16) | values[1]
-                    sf = scale_factors.get(reg_info.get('sf'), 0)
+
+                    # Get fresh scale factor for this reading
+                    sf = self._get_scale_factor(reg_info)
                     value = self._apply_scale_factor(raw_value, sf)
                     results[reg_info['name']] = value
 
@@ -194,6 +211,7 @@ class SolarEdgeModbusReader:
                     # Read single register
                     values = self._read_registers(addr, 1)
                     raw_value = values[0]
+
                     # Handle signed values
                     if reg_info['type'] == 'int16' and raw_value > 32767:
                         raw_value = raw_value - 65536
@@ -203,8 +221,8 @@ class SolarEdgeModbusReader:
                         results[reg_info['name']] = None
                         continue
 
-                    # Apply scale factor
-                    sf = scale_factors.get(reg_info.get('sf'), 0)
+                    # Get fresh scale factor for this reading
+                    sf = self._get_scale_factor(reg_info)
                     value = self._apply_scale_factor(raw_value, sf)
                     results[reg_info['name']] = value
 
@@ -220,12 +238,12 @@ class SolarEdgeModbusReader:
         return results
 
 def format_value(name, value, unit=None):
-    """Format values for nice display"""
+    """Format values for nice display with improved validation"""
     if value is None:
         return "N/A"
 
     # Handle special cases for invalid values
-    if name == 'I_AC_VoltageAN' and value > 1000:  # Unrealistically high voltage
+    if name == 'I_AC_VoltageAN' and (value > 1000 or value < 0):  # Unrealistic voltage
         return "N/A"
     if name == 'I_AC_Frequency' and (value < 45 or value > 55):  # Invalid frequency
         return "N/A"
@@ -234,40 +252,43 @@ def format_value(name, value, unit=None):
 
     if 'Energy' in name:
         if value >= 1000000:
-            return f"{value/1000000:.2f} MWh"
-        return f"{value/1000:.1f} kWh"
+            return f"{value/1000000:.3f} MWh"
+        return f"{value/1000:.3f} kWh"
     elif 'Power' in name:
-        if value >= 1000:
-            return f"{value/1000:.2f} kW"
+        if abs(value) >= 1000:
+            return f"{value/1000:.3f} kW"
         return f"{value:.1f} W"
     elif 'Current' in name:
-        return f"{value:.2f} A"
+        return f"{value:.3f} A"
     elif 'Voltage' in name:
-        return f"{value:.1f} V"
+        return f"{value:.2f} V"
     elif 'Frequency' in name:
-        return f"{value:.2f} Hz"
+        return f"{value:.3f} Hz"
     elif 'Temp' in name:
         return f"{value:.1f} °C"
     elif unit:
         return f"{value} {unit}"
-    return str(value)
+    return f"{value:.3f}"
 
 def save_to_database(data):
-    """Append data to the database text file."""
-    with open(DB_FILE, 'a') as f:
-        f.write(f"{data['timestamp']}, "
-                f"AC Power: {data['ac_power']} W, "
-                f"DC Power: {data['dc_power']} W, "
-                f"State: {data['state']}, "
-                f"Energy: {data['energy']} MWh\n")
+    """Append data to the database text file with improved formatting"""
+    try:
+        with open(DB_FILE, 'a') as f:
+            f.write(f"{data['timestamp']}, "
+                    f"AC Power: {data['ac_power']:.1f} W, "
+                    f"DC Power: {data['dc_power']:.1f} W, "
+                    f"State: {data['state']}, "
+                    f"Energy: {data['energy']:.6f} MWh\n")
+    except Exception as e:
+        print(f"Error saving to database: {str(e)}")
 
 def main():
-    print("SolarEdge Modbus Reader with Auto-Logging")
-    print("---------------------------------------")
+    print("SolarEdge Modbus Reader with Improved Scaling")
+    print("-------------------------------------------")
     print(f"Data will be logged to {DB_FILE} every {LOG_INTERVAL} seconds\n")
 
     # Configuration
-    inverter_ip = "192.168.8.218"
+    inverter_ip = "192.168.8.231"
     modbus_port = 1502
     unit_id = 1
 
@@ -289,26 +310,26 @@ def main():
 
             print("\n=== AC Measurements ===")
             ac_power = data.get('I_AC_Power')
-            print(f"Power:        {format_value('Power', ac_power)}")
+            print(f"Power:        {format_value('I_AC_Power', ac_power)}")
             print(f"Voltage (A-N): {format_value('I_AC_VoltageAN', data.get('I_AC_VoltageAN'))}")
             print(f"Voltage (A-B): {format_value('I_AC_VoltageAB', data.get('I_AC_VoltageAB'))}")
-            print(f"Current:      {format_value('Current', data.get('I_AC_Current'))}")
+            print(f"Current:      {format_value('I_AC_Current', data.get('I_AC_Current'))}")
             print(f"Frequency:    {format_value('I_AC_Frequency', data.get('I_AC_Frequency'))}")
             energy = data.get('I_AC_Energy_WH')
-            print(f"Energy:       {format_value('Energy', energy)}")
+            print(f"Energy:       {format_value('I_AC_Energy_WH', energy)}")
 
             print("\n=== DC Measurements ===")
             dc_power = data.get('I_DC_Power')
-            print(f"Power:        {format_value('Power', dc_power)}")
-            print(f"Voltage:      {format_value('Voltage', data.get('I_DC_Voltage'))}")
-            print(f"Current:      {format_value('Current', data.get('I_DC_Current'))}")
+            print(f"Power:        {format_value('I_DC_Power', dc_power)}")
+            print(f"Voltage:      {format_value('I_DC_Voltage', data.get('I_DC_Voltage'))}")
+            print(f"Current:      {format_value('I_DC_Current', data.get('I_DC_Current'))}")
 
             print("\n=== Status ===")
             state = data.get('I_Status_Description', 'N/A')
             print(f"State:        {state}")
             print(f"Heat Sink:    {format_value('I_Temp_Sink', data.get('I_Temp_Sink'))}")
 
-            print(f"\nData read completed in {elapsed:.1f} seconds")
+            print(f"\nData read completed in {elapsed:.2f} seconds")
 
             # Prepare data for logging
             log_data = {
