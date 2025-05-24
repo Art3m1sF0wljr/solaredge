@@ -20,7 +20,7 @@ LOG_FILE = 'solar_edge_data.log'  # Path to your local log file
 FTP_HOST = os.getenv('FTP_HOST')
 FTP_USER = os.getenv('FTP_USER')
 FTP_PASS = os.getenv('FTP_PASS')
-REMOTE_PATH = '/solar_data/'  # Change this to your desired remote path
+REMOTE_PATH = '/solaredge/'  # Change this to your desired remote path
 UPLOAD_INTERVAL = 600  # 10 minutes in seconds
 DAYS_TO_KEEP = 3  # Number of days to keep in the uploaded file
 
@@ -90,7 +90,7 @@ def upload_log_file():
                 return False
 
         # Upload the filtered content
-        remote_filename = f"solar_edge_last_{DAYS_TO_KEEP}_days.log"
+        remote_filename = f"solar_edge_data.log"
         ftps.storbinary(f'STOR {remote_filename}', io.BytesIO(filtered_content.encode('utf-8')))
         logging.info(f"Successfully uploaded {remote_filename} with {filtered_content.count('\n')} lines")
         return True
