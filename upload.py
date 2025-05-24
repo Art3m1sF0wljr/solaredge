@@ -16,7 +16,7 @@ logging.basicConfig(
 load_dotenv()
 
 # Configuration
-LOG_FILE = 'solar_edge_data.log'  # Path to your local log file
+LOG_FILE = '/home/pi/program/solaredge/solar_edge_data.log'  # Path to your local log file
 FTP_HOST = os.getenv('FTP_HOST')
 FTP_USER = os.getenv('FTP_USER')
 FTP_PASS = os.getenv('FTP_PASS')
