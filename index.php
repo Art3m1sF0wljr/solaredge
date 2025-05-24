@@ -224,6 +224,11 @@ foreach ($processed_data as $item) {
                         scaleLabel: {
                             display: true,
                             labelString: 'Power (kW)'
+                        },
+                        ticks: {
+                            min: 0,
+                            max: 5,
+                            stepSize: 0.5
                         }
                     }]
                 },
@@ -279,6 +284,11 @@ foreach ($processed_data as $item) {
                         scaleLabel: {
                             display: true,
                             labelString: 'Power (kW)'
+                        },
+                        ticks: {
+                            min: 0,
+                            max: 5,
+                            stepSize: 0.5
                         }
                     }]
                 },
