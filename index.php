@@ -55,7 +55,7 @@ function calculate_energy_derivative($data) {
     global $SMOOTHING_WINDOW;
     if (empty($data)) return $data;
     
-    // Sort by timestamp (PHP 5.6 compatible version)
+    // Sort by timestamp
     usort($data, function($a, $b) {
         if ($a['timestamp'] == $b['timestamp']) {
             return 0;
@@ -104,7 +104,7 @@ $data = parse_log_file($LOG_FILE);
 $filtered_data = filter_last_days($data, $PLOT_DAYS);
 $processed_data = calculate_energy_derivative($filtered_data);
 
-// Prepare data for JavaScript
+// Prepare data for JavaScript (with 5kW clipping)
 $timestamps = array();
 $ac_power = array();
 $dc_power = array();
@@ -113,19 +113,19 @@ $power_from_energy_smoothed = array();
 
 foreach ($processed_data as $item) {
     $timestamps[] = $item['timestamp']->format('Y-m-d H:i:s');
-    $ac_power[] = $item['ac_power'] / 1000; // W to kW
-    $dc_power[] = $item['dc_power'] / 1000; // W to kW
-    $power_from_energy[] = isset($item['power_from_energy']) ? $item['power_from_energy'] / 1000 : 0;
-    $power_from_energy_smoothed[] = isset($item['power_from_energy_smoothed']) ? $item['power_from_energy_smoothed'] / 1000 : 0;
+    $ac_power[] = min($item['ac_power'] / 1000, 5); // Clip to 5kW max
+    $dc_power[] = min($item['dc_power'] / 1000, 5); // Clip to 5kW max
+    $power_from_energy[] = min(isset($item['power_from_energy']) ? $item['power_from_energy'] / 1000 : 0, 5);
+    $power_from_energy_smoothed[] = min(isset($item['power_from_energy_smoothed']) ? $item['power_from_energy_smoothed'] / 1000 : 0, 5);
 }
 ?>
 <!DOCTYPE html>
 <html>
 <head>
     <title>SolarEdge Power Monitor</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/moment"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-moment"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@2.9.4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/moment@2.29.1"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-moment@1.0.0"></script>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -135,6 +135,10 @@ foreach ($processed_data as $item) {
             width: 100%;
             max-width: 1200px;
             margin: 0 auto 30px auto;
+            overflow: hidden;
+        }
+        canvas {
+            display: block;
         }
         .refresh-btn {
             background-color: #4CAF50;
@@ -228,7 +232,14 @@ foreach ($processed_data as $item) {
                         ticks: {
                             min: 0,
                             max: 5,
-                            stepSize: 0.5
+                            stepSize: 1,
+                            callback: function(value) {
+                                return value + ' kW';
+                            }
+                        },
+                        afterBuildTicks: function(scale) {
+                            scale.max = 5;
+                            scale.min = 0;
                         }
                     }]
                 },
@@ -288,7 +299,14 @@ foreach ($processed_data as $item) {
                         ticks: {
                             min: 0,
                             max: 5,
-                            stepSize: 0.5
+                            stepSize: 1,
+                            callback: function(value) {
+                                return value + ' kW';
+                            }
+                        },
+                        afterBuildTicks: function(scale) {
+                            scale.max = 5;
+                            scale.min = 0;
                         }
                     }]
                 },
