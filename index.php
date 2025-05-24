@@ -52,11 +52,15 @@ function filter_last_days($data, $days) {
 
 // Function to calculate power from energy differences
 function calculate_energy_derivative($data) {
+    global $SMOOTHING_WINDOW;
     if (empty($data)) return $data;
     
-    // Sort by timestamp
+    // Sort by timestamp (PHP 5.6 compatible version)
     usort($data, function($a, $b) {
-        return $a['timestamp'] <=> $b['timestamp'];
+        if ($a['timestamp'] == $b['timestamp']) {
+            return 0;
+        }
+        return ($a['timestamp'] < $b['timestamp']) ? -1 : 1;
     });
     
     $prev = null;
@@ -78,12 +82,15 @@ function calculate_energy_derivative($data) {
         
         $prev = $item;
     }
+    unset($item); // Break the reference
     
     // Apply smoothing
     $count = count($data);
     for ($i = 0; $i < $count; $i++) {
         $window = array();
-        for ($j = max(0, $i - floor($SMOOTHING_WINDOW/2)); $j <= min($count-1, $i + floor($SMOOTHING_WINDOW/2)); $j++) {
+        $start = max(0, $i - floor($SMOOTHING_WINDOW/2));
+        $end = min($count-1, $i + floor($SMOOTHING_WINDOW/2));
+        for ($j = $start; $j <= $end; $j++) {
             $window[] = $data[$j]['power_from_energy'];
         }
         $data[$i]['power_from_energy_smoothed'] = array_sum($window) / count($window);
@@ -166,15 +173,15 @@ foreach ($processed_data as $item) {
     
     <script>
         // Prepare data
-        const timestamps = <?php echo json_encode($timestamps); ?>;
-        const acPower = <?php echo json_encode($ac_power); ?>;
-        const dcPower = <?php echo json_encode($dc_power); ?>;
-        const powerFromEnergy = <?php echo json_encode($power_from_energy); ?>;
-        const powerFromEnergySmoothed = <?php echo json_encode($power_from_energy_smoothed); ?>;
+        var timestamps = <?php echo json_encode($timestamps); ?>;
+        var acPower = <?php echo json_encode($ac_power); ?>;
+        var dcPower = <?php echo json_encode($dc_power); ?>;
+        var powerFromEnergy = <?php echo json_encode($power_from_energy); ?>;
+        var powerFromEnergySmoothed = <?php echo json_encode($power_from_energy_smoothed); ?>;
         
         // Power Chart (AC and DC)
-        const powerCtx = document.getElementById('powerChart').getContext('2d');
-        const powerChart = new Chart(powerCtx, {
+        var powerCtx = document.getElementById('powerChart').getContext('2d');
+        var powerChart = new Chart(powerCtx, {
             type: 'line',
             data: {
                 labels: timestamps,
@@ -200,7 +207,7 @@ foreach ($processed_data as $item) {
             options: {
                 responsive: true,
                 scales: {
-                    x: {
+                    xAxes: [{
                         type: 'time',
                         time: {
                             unit: 'hour',
@@ -208,30 +215,28 @@ foreach ($processed_data as $item) {
                                 hour: 'MMM D HH:mm'
                             }
                         },
-                        title: {
+                        scaleLabel: {
                             display: true,
-                            text: 'Time'
+                            labelString: 'Time'
                         }
-                    },
-                    y: {
-                        title: {
+                    }],
+                    yAxes: [{
+                        scaleLabel: {
                             display: true,
-                            text: 'Power (kW)'
+                            labelString: 'Power (kW)'
                         }
-                    }
+                    }]
                 },
-                plugins: {
-                    title: {
-                        display: true,
-                        text: 'Direct Power Measurements (Last <?php echo $PLOT_DAYS; ?> Days)'
-                    }
+                title: {
+                    display: true,
+                    text: 'Direct Power Measurements (Last <?php echo $PLOT_DAYS; ?> Days)'
                 }
             }
         });
         
         // Energy Derivative Chart
-        const energyCtx = document.getElementById('energyDerivativeChart').getContext('2d');
-        const energyChart = new Chart(energyCtx, {
+        var energyCtx = document.getElementById('energyDerivativeChart').getContext('2d');
+        var energyChart = new Chart(energyCtx, {
             type: 'line',
             data: {
                 labels: timestamps,
@@ -257,7 +262,7 @@ foreach ($processed_data as $item) {
             options: {
                 responsive: true,
                 scales: {
-                    x: {
+                    xAxes: [{
                         type: 'time',
                         time: {
                             unit: 'hour',
@@ -265,23 +270,21 @@ foreach ($processed_data as $item) {
                                 hour: 'MMM D HH:mm'
                             }
                         },
-                        title: {
+                        scaleLabel: {
                             display: true,
-                            text: 'Time'
+                            labelString: 'Time'
                         }
-                    },
-                    y: {
-                        title: {
+                    }],
+                    yAxes: [{
+                        scaleLabel: {
                             display: true,
-                            text: 'Power (kW)'
+                            labelString: 'Power (kW)'
                         }
-                    }
+                    }]
                 },
-                plugins: {
-                    title: {
-                        display: true,
-                        text: 'Power Calculated from Energy Differences (ΔE/Δt)'
-                    }
+                title: {
+                    display: true,
+                    text: 'Power Calculated from Energy Differences (ΔE/Δt)'
                 }
             }
         });
