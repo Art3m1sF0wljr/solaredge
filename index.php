@@ -1,0 +1,290 @@
+<?php
+// Configuration
+$LOG_FILE = __DIR__ . '/solar_edge_data.log';
+$PLOT_DAYS = 3;
+$SMOOTHING_WINDOW = 5;
+
+// Function to parse the log file
+function parse_log_file($filename) {
+    $data = array();
+    if (!file_exists($filename)) {
+        return $data;
+    }
+    
+    $lines = file($filename, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    foreach ($lines as $line) {
+        $parts = explode(', ', $line);
+        if (count($parts) < 5) continue;
+        
+        try {
+            $timestamp = DateTime::createFromFormat('Y-m-d\TH:i:s.u', $parts[0]);
+            if (!$timestamp) continue;
+            
+            $ac_power = (float)explode(' ', explode(': ', $parts[1])[1])[0];
+            $dc_power = (float)explode(' ', explode(': ', $parts[2])[1])[0];
+            $state = explode(': ', $parts[3])[1];
+            $energy = (float)explode(' ', explode(': ', $parts[4])[1])[0] * 1000; // MWh to kWh
+            
+            $data[] = array(
+                'timestamp' => $timestamp,
+                'ac_power' => $ac_power,
+                'dc_power' => $dc_power,
+                'state' => $state,
+                'energy' => $energy
+            );
+        } catch (Exception $e) {
+            continue;
+        }
+    }
+    
+    return $data;
+}
+
+// Function to filter last N days
+function filter_last_days($data, $days) {
+    $cutoff = new DateTime();
+    $cutoff->sub(new DateInterval('P'.$days.'D'));
+    
+    return array_filter($data, function($item) use ($cutoff) {
+        return $item['timestamp'] >= $cutoff;
+    });
+}
+
+// Function to calculate power from energy differences
+function calculate_energy_derivative($data) {
+    if (empty($data)) return $data;
+    
+    // Sort by timestamp
+    usort($data, function($a, $b) {
+        return $a['timestamp'] <=> $b['timestamp'];
+    });
+    
+    $prev = null;
+    foreach ($data as &$item) {
+        if ($prev === null) {
+            $item['power_from_energy'] = 0;
+            $prev = $item;
+            continue;
+        }
+        
+        $time_diff = $item['timestamp']->getTimestamp() - $prev['timestamp']->getTimestamp();
+        $energy_diff = ($item['energy'] - $prev['energy']) * 1000; // kWh to Wh
+        
+        if ($time_diff > 0) {
+            $item['power_from_energy'] = $energy_diff / ($time_diff / 3600); // Wh to W
+        } else {
+            $item['power_from_energy'] = 0;
+        }
+        
+        $prev = $item;
+    }
+    
+    // Apply smoothing
+    $count = count($data);
+    for ($i = 0; $i < $count; $i++) {
+        $window = array();
+        for ($j = max(0, $i - floor($SMOOTHING_WINDOW/2)); $j <= min($count-1, $i + floor($SMOOTHING_WINDOW/2)); $j++) {
+            $window[] = $data[$j]['power_from_energy'];
+        }
+        $data[$i]['power_from_energy_smoothed'] = array_sum($window) / count($window);
+    }
+    
+    return $data;
+}
+
+// Process the data
+$data = parse_log_file($LOG_FILE);
+$filtered_data = filter_last_days($data, $PLOT_DAYS);
+$processed_data = calculate_energy_derivative($filtered_data);
+
+// Prepare data for JavaScript
+$timestamps = array();
+$ac_power = array();
+$dc_power = array();
+$power_from_energy = array();
+$power_from_energy_smoothed = array();
+
+foreach ($processed_data as $item) {
+    $timestamps[] = $item['timestamp']->format('Y-m-d H:i:s');
+    $ac_power[] = $item['ac_power'] / 1000; // W to kW
+    $dc_power[] = $item['dc_power'] / 1000; // W to kW
+    $power_from_energy[] = isset($item['power_from_energy']) ? $item['power_from_energy'] / 1000 : 0;
+    $power_from_energy_smoothed[] = isset($item['power_from_energy_smoothed']) ? $item['power_from_energy_smoothed'] / 1000 : 0;
+}
+?>
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SolarEdge Power Monitor</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/moment"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-moment"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        .chart-container {
+            width: 100%;
+            max-width: 1200px;
+            margin: 0 auto 30px auto;
+        }
+        .refresh-btn {
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            padding: 10px 20px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 10px 2px;
+            cursor: pointer;
+            border-radius: 5px;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>SolarEdge Power Monitor</h1>
+        <button class="refresh-btn" onclick="window.location.reload()">Refresh Data</button>
+    </div>
+    
+    <div class="chart-container">
+        <canvas id="powerChart"></canvas>
+    </div>
+    
+    <div class="chart-container">
+        <canvas id="energyDerivativeChart"></canvas>
+    </div>
+    
+    <script>
+        // Prepare data
+        const timestamps = <?php echo json_encode($timestamps); ?>;
+        const acPower = <?php echo json_encode($ac_power); ?>;
+        const dcPower = <?php echo json_encode($dc_power); ?>;
+        const powerFromEnergy = <?php echo json_encode($power_from_energy); ?>;
+        const powerFromEnergySmoothed = <?php echo json_encode($power_from_energy_smoothed); ?>;
+        
+        // Power Chart (AC and DC)
+        const powerCtx = document.getElementById('powerChart').getContext('2d');
+        const powerChart = new Chart(powerCtx, {
+            type: 'line',
+            data: {
+                labels: timestamps,
+                datasets: [
+                    {
+                        label: 'AC Power (kW)',
+                        data: acPower,
+                        borderColor: 'blue',
+                        backgroundColor: 'rgba(0, 0, 255, 0.1)',
+                        borderWidth: 1.5,
+                        pointRadius: 0
+                    },
+                    {
+                        label: 'DC Power (kW)',
+                        data: dcPower,
+                        borderColor: 'green',
+                        backgroundColor: 'rgba(0, 255, 0, 0.1)',
+                        borderWidth: 1.5,
+                        pointRadius: 0
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    x: {
+                        type: 'time',
+                        time: {
+                            unit: 'hour',
+                            displayFormats: {
+                                hour: 'MMM D HH:mm'
+                            }
+                        },
+                        title: {
+                            display: true,
+                            text: 'Time'
+                        }
+                    },
+                    y: {
+                        title: {
+                            display: true,
+                            text: 'Power (kW)'
+                        }
+                    }
+                },
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'Direct Power Measurements (Last <?php echo $PLOT_DAYS; ?> Days)'
+                    }
+                }
+            }
+        });
+        
+        // Energy Derivative Chart
+        const energyCtx = document.getElementById('energyDerivativeChart').getContext('2d');
+        const energyChart = new Chart(energyCtx, {
+            type: 'line',
+            data: {
+                labels: timestamps,
+                datasets: [
+                    {
+                        label: 'Instantaneous Power',
+                        data: powerFromEnergy,
+                        borderColor: 'red',
+                        backgroundColor: 'rgba(255, 0, 0, 0.1)',
+                        borderWidth: 1,
+                        pointRadius: 0
+                    },
+                    {
+                        label: 'Smoothed Power',
+                        data: powerFromEnergySmoothed,
+                        borderColor: 'red',
+                        backgroundColor: 'rgba(255, 0, 0, 0.1)',
+                        borderWidth: 2,
+                        pointRadius: 0
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    x: {
+                        type: 'time',
+                        time: {
+                            unit: 'hour',
+                            displayFormats: {
+                                hour: 'MMM D HH:mm'
+                            }
+                        },
+                        title: {
+                            display: true,
+                            text: 'Time'
+                        }
+                    },
+                    y: {
+                        title: {
+                            display: true,
+                            text: 'Power (kW)'
+                        }
+                    }
+                },
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'Power Calculated from Energy Differences (ΔE/Δt)'
+                    }
+                }
+            }
+        });
+    </script>
+</body>
+</html>
