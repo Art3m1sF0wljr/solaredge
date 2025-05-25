@@ -1,4 +1,6 @@
 <?php
+
+
 // Configuration
 $LOG_FILE = __DIR__ . '/solar_edge_data.log';
 $PLOT_DAYS = 3;
@@ -14,7 +16,7 @@ function parse_log_file($filename) {
     $lines = file($filename, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
     foreach ($lines as $line) {
         $parts = explode(', ', $line);
-        if (count($parts) < 5) continue;
+        if (count($parts) < 9) continue;
         
         try {
             $timestamp = DateTime::createFromFormat('Y-m-d\TH:i:s.u', $parts[0]);
@@ -24,13 +26,21 @@ function parse_log_file($filename) {
             $dc_power = (float)explode(' ', explode(': ', $parts[2])[1])[0];
             $state = explode(': ', $parts[3])[1];
             $energy = (float)explode(' ', explode(': ', $parts[4])[1])[0] * 1000; // MWh to kWh
+            $ac_current = (float)explode(' ', explode(': ', $parts[5])[1])[0];
+            $dc_current = (float)explode(' ', explode(': ', $parts[6])[1])[0];
+            $ac_voltage = (float)explode(' ', explode(': ', $parts[7])[1])[0];
+            $temp_sink = (float)explode(' ', explode(': ', $parts[8])[1])[0];
             
             $data[] = array(
                 'timestamp' => $timestamp,
                 'ac_power' => $ac_power,
                 'dc_power' => $dc_power,
                 'state' => $state,
-                'energy' => $energy
+                'energy' => $energy,
+                'ac_current' => $ac_current,
+                'dc_current' => $dc_current,
+                'ac_voltage' => $ac_voltage,
+                'temp_sink' => $temp_sink
             );
         } catch (Exception $e) {
             continue;
@@ -105,11 +115,16 @@ $filtered_data = filter_last_days($data, $PLOT_DAYS);
 $processed_data = calculate_energy_derivative($filtered_data);
 
 // Prepare data for JavaScript (with 5kW clipping)
+// Prepare data for JavaScript
 $timestamps = array();
 $ac_power = array();
 $dc_power = array();
 $power_from_energy = array();
 $power_from_energy_smoothed = array();
+$ac_current = array();
+$dc_current = array();
+$ac_voltage = array();
+$temp_sink = array();
 
 foreach ($processed_data as $item) {
     $timestamps[] = $item['timestamp']->format('Y-m-d H:i:s');
@@ -117,6 +132,10 @@ foreach ($processed_data as $item) {
     $dc_power[] = min($item['dc_power'] / 1000, 5); // Clip to 5kW max
     $power_from_energy[] = min(isset($item['power_from_energy']) ? $item['power_from_energy'] / 1000 : 0, 5);
     $power_from_energy_smoothed[] = min(isset($item['power_from_energy_smoothed']) ? $item['power_from_energy_smoothed'] / 1000 : 0, 5);
+    $ac_current[] = $item['ac_current'];
+    $dc_current[] = $item['dc_current'];
+    $ac_voltage[] = $item['ac_voltage'];
+    $temp_sink[] = $item['temp_sink'];
 }
 ?>
 <!DOCTYPE html>
@@ -173,6 +192,17 @@ foreach ($processed_data as $item) {
     
     <div class="chart-container">
         <canvas id="energyDerivativeChart"></canvas>
+    </div>
+    <div class="chart-container">
+        <canvas id="currentChart"></canvas>
+    </div>
+    
+    <div class="chart-container">
+        <canvas id="voltageChart"></canvas>
+    </div>
+    
+    <div class="chart-container">
+        <canvas id="temperatureChart"></canvas>
     </div>
     
     <script>
@@ -316,6 +346,167 @@ foreach ($processed_data as $item) {
                 }
             }
         });
+                // Current Chart
+        var currentCtx = document.getElementById('currentChart').getContext('2d');
+        var currentChart = new Chart(currentCtx, {
+            type: 'line',
+            data: {
+                labels: timestamps,
+                datasets: [
+                    {
+                        label: 'AC Current (A)',
+                        data: <?php echo json_encode($ac_current); ?>,
+                        borderColor: 'orange',
+                        backgroundColor: 'rgba(255, 165, 0, 0.1)',
+                        borderWidth: 1.5,
+                        pointRadius: 0
+                    },
+                    {
+                        label: 'DC Current (A)',
+                        data: <?php echo json_encode($dc_current); ?>,
+                        borderColor: 'purple',
+                        backgroundColor: 'rgba(128, 0, 128, 0.1)',
+                        borderWidth: 1.5,
+                        pointRadius: 0
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    xAxes: [{
+                        type: 'time',
+                        time: {
+                            unit: 'hour',
+                            displayFormats: {
+                                hour: 'MMM D HH:mm'
+                            }
+                        },
+                        scaleLabel: {
+                            display: true,
+                            labelString: 'Time'
+                        }
+                    }],
+                    yAxes: [{
+                        scaleLabel: {
+                            display: true,
+                            labelString: 'Current (A)'
+                        },
+                        ticks: {
+                            min: 0
+                        }
+                    }]
+                },
+                title: {
+                    display: true,
+                    text: 'Current Measurements (Last <?php echo $PLOT_DAYS; ?> Days)'
+                }
+            }
+        });
+        
+        // Voltage Chart
+        var voltageCtx = document.getElementById('voltageChart').getContext('2d');
+        var voltageChart = new Chart(voltageCtx, {
+            type: 'line',
+            data: {
+                labels: timestamps,
+                datasets: [
+                    {
+                        label: 'AC Voltage (V)',
+                        data: <?php echo json_encode($ac_voltage); ?>,
+                        borderColor: 'red',
+                        backgroundColor: 'rgba(255, 0, 0, 0.1)',
+                        borderWidth: 1.5,
+                        pointRadius: 0
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    xAxes: [{
+                        type: 'time',
+                        time: {
+                            unit: 'hour',
+                            displayFormats: {
+                                hour: 'MMM D HH:mm'
+                            }
+                        },
+                        scaleLabel: {
+                            display: true,
+                            labelString: 'Time'
+                        }
+                    }],
+                    yAxes: [{
+                        scaleLabel: {
+                            display: true,
+                            labelString: 'Voltage (V)'
+                        },
+                        ticks: {
+                            min: 200,
+                            max: 250,
+                            stepSize: 10
+                        }
+                    }]
+                },
+                title: {
+                    display: true,
+                    text: 'Voltage Measurements (Last <?php echo $PLOT_DAYS; ?> Days)'
+                }
+            }
+        });
+        
+        // Temperature Chart
+        var tempCtx = document.getElementById('temperatureChart').getContext('2d');
+        var tempChart = new Chart(tempCtx, {
+            type: 'line',
+            data: {
+                labels: timestamps,
+                datasets: [
+                    {
+                        label: 'Heat Sink Temperature (°C)',
+                        data: <?php echo json_encode($temp_sink); ?>,
+                        borderColor: 'green',
+                        backgroundColor: 'rgba(0, 128, 0, 0.1)',
+                        borderWidth: 1.5,
+                        pointRadius: 0
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    xAxes: [{
+                        type: 'time',
+                        time: {
+                            unit: 'hour',
+                            displayFormats: {
+                                hour: 'MMM D HH:mm'
+                            }
+                        },
+                        scaleLabel: {
+                            display: true,
+                            labelString: 'Time'
+                        }
+                    }],
+                    yAxes: [{
+                        scaleLabel: {
+                            display: true,
+                            labelString: 'Temperature (°C)'
+                        },
+                        ticks: {
+                            min: 20,
+                            max: 80,
+                            stepSize: 10
+                        }
+                    }]
+                },
+                title: {
+                    display: true,
+                    text: 'Heat Sink Temperature (Last <?php echo $PLOT_DAYS; ?> Days)'
+                }
+            }
+        });
     </script>
-</body>
+  </body>
 </html>
