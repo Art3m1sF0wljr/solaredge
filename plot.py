@@ -131,6 +131,7 @@ def update_plots(frame):
         ax1.set_title(f'Direct Power Measurements (Last {PLOT_DAYS} Days)')
         ax1.legend(loc='upper left')
         ax1.grid(True, which='both', linestyle='--', alpha=0.7)
+        ax1.set_ylim(0, 5)
 
         # Plot 2: Power calculated from energy derivative
         if 'power_from_energy' in df.columns:
@@ -144,6 +145,7 @@ def update_plots(frame):
             ax2.legend(loc='upper left')
             ax2.grid(True, which='both', linestyle='--', alpha=0.7)
             ax2.axhline(0, color='black', linestyle='-', alpha=0.3)
+            ax2.set_ylim(0, 5)
 
         # Set common x-axis limits based on data range
         xmin = df['timestamp'].min()
