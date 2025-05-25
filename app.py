@@ -165,20 +165,20 @@ class SolarEdgeModbusReader:
         """Get the current scale factor for a register"""
         if 'sf' not in reg_info:
             return None
-
+            
         sf_addr = reg_info['sf']
         sf_reg = self.registers.get(sf_addr)
         if not sf_reg:
             return None
-
+            
         try:
             values = self._read_registers(sf_addr, 1)
             sf = values[0]
-
+            
             # Handle signed scale factors
             if sf_reg['type'] == 'int16' and sf > 32767:
                 sf = sf - 65536
-
+                
             return sf
         except Exception as e:
             print(f"Warning: Could not read scale factor {sf_reg['name']}: {str(e)}")
@@ -201,7 +201,7 @@ class SolarEdgeModbusReader:
                     # Read 2 registers for 32-bit value
                     values = self._read_registers(addr, 2)
                     raw_value = (values[0] << 16) | values[1]
-
+                    
                     # Get fresh scale factor for this reading
                     sf = self._get_scale_factor(reg_info)
                     value = self._apply_scale_factor(raw_value, sf)
@@ -211,7 +211,7 @@ class SolarEdgeModbusReader:
                     # Read single register
                     values = self._read_registers(addr, 1)
                     raw_value = values[0]
-
+                    
                     # Handle signed values
                     if reg_info['type'] == 'int16' and raw_value > 32767:
                         raw_value = raw_value - 65536
@@ -278,7 +278,11 @@ def save_to_database(data):
                     f"AC Power: {data['ac_power']:.1f} W, "
                     f"DC Power: {data['dc_power']:.1f} W, "
                     f"State: {data['state']}, "
-                    f"Energy: {data['energy']:.6f} MWh\n")
+                    f"Energy: {data['energy']:.6f} MWh, "
+                    f"AC Current: {data['ac_current']:.3f} A, "
+                    f"DC Current: {data['dc_current']:.3f} A, "
+                    f"AC Voltage: {data['ac_voltage']:.2f} V, "
+                    f"Heat Sink Temp: {data['temp_sink']:.1f} °C\n")
     except Exception as e:
         print(f"Error saving to database: {str(e)}")
 
@@ -332,12 +336,17 @@ def main():
             print(f"\nData read completed in {elapsed:.2f} seconds")
 
             # Prepare data for logging
+                        # Prepare data for logging
             log_data = {
                 'timestamp': datetime.now().isoformat(),
                 'ac_power': ac_power if ac_power is not None else 0.0,
                 'dc_power': dc_power if dc_power is not None else 0.0,
                 'state': state,
-                'energy': energy / 1000000 if energy is not None else 0.0  # Convert to MWh
+                'energy': energy / 1000000 if energy is not None else 0.0,  # Convert to MWh
+                'ac_current': data.get('I_AC_Current', 0.0),
+                'dc_current': data.get('I_DC_Current', 0.0),
+                'ac_voltage': data.get('I_AC_VoltageAN', 0.0),
+                'temp_sink': data.get('I_Temp_Sink', 0.0)
             }
 
             # Save to database
