@@ -37,8 +37,8 @@ function parse_log_file($filename) {
                 'dc_power' => $dc_power,
                 'state' => $state,
                 'energy' => $energy,
-                'ac_current' => $ac_current,
-                'dc_current' => $dc_current,
+                'ac_' => $ac_,
+                'dc_' => $dc_,
                 'ac_voltage' => $ac_voltage,
                 'temp_sink' => $temp_sink
             );
@@ -121,8 +121,8 @@ $ac_power = array();
 $dc_power = array();
 $power_from_energy = array();
 $power_from_energy_smoothed = array();
-$ac_current = array();
-$dc_current = array();
+$ac_ = array();
+$dc_ = array();
 $ac_voltage = array();
 $temp_sink = array();
 
@@ -132,8 +132,8 @@ foreach ($processed_data as $item) {
     $dc_power[] = min($item['dc_power'] / 1000, 5); // Clip to 5kW max
     $power_from_energy[] = min(isset($item['power_from_energy']) ? $item['power_from_energy'] / 1000 : 0, 5);
     $power_from_energy_smoothed[] = min(isset($item['power_from_energy_smoothed']) ? $item['power_from_energy_smoothed'] / 1000 : 0, 5);
-    $ac_current[] = $item['ac_current'];
-    $dc_current[] = $item['dc_current'];
+    $ac_[] = $item['ac_'];
+    $dc_[] = $item['dc_'];
     $ac_voltage[] = $item['ac_voltage'];
     $temp_sink[] = $item['temp_sink'];
 }
@@ -194,7 +194,7 @@ foreach ($processed_data as $item) {
         <canvas id="energyDerivativeChart"></canvas>
     </div>
     <div class="chart-container">
-        <canvas id="currentChart"></canvas>
+        <canvas id="Chart"></canvas>
     </div>
     
     <div class="chart-container">
@@ -346,63 +346,72 @@ foreach ($processed_data as $item) {
                 }
             }
         });
-                // Current Chart
-        var currentCtx = document.getElementById('currentChart').getContext('2d');
-        var currentChart = new Chart(currentCtx, {
-            type: 'line',
-            data: {
-                labels: timestamps,
-                datasets: [
-                    {
-                        label: 'AC Current (A)',
-                        data: <?php echo json_encode($ac_current); ?>,
-                        borderColor: 'orange',
-                        backgroundColor: 'rgba(255, 165, 0, 0.1)',
-                        borderWidth: 1.5,
-                        pointRadius: 0
-                    },
-                    {
-                        label: 'DC Current (A)',
-                        data: <?php echo json_encode($dc_current); ?>,
-                        borderColor: 'purple',
-                        backgroundColor: 'rgba(128, 0, 128, 0.1)',
-                        borderWidth: 1.5,
-                        pointRadius: 0
-                    }
-                ]
+        // Current Chart
+var currentCtx = document.getElementById('currentChart').getContext('2d');
+var currentChart = new Chart(currentCtx, {
+    type: 'line',
+    data: {
+        labels: timestamps,
+        datasets: [
+            {
+                label: 'AC Current (A)',
+                data: <?php echo json_encode($ac_current); ?>,
+                borderColor: 'orange',
+                backgroundColor: 'rgba(255, 165, 0, 0.1)',
+                borderWidth: 1.5,
+                pointRadius: 0
             },
-            options: {
-                responsive: true,
-                scales: {
-                    xAxes: [{
-                        type: 'time',
-                        time: {
-                            unit: 'hour',
-                            displayFormats: {
-                                hour: 'MMM D HH:mm'
-                            }
-                        },
-                        scaleLabel: {
-                            display: true,
-                            labelString: 'Time'
-                        }
-                    }],
-                    yAxes: [{
-                        scaleLabel: {
-                            display: true,
-                            labelString: 'Current (A)'
-                        },
-                        ticks: {
-                            min: 0
-                        }
-                    }]
-                },
-                title: {
-                    display: true,
-                    text: 'Current Measurements (Last <?php echo $PLOT_DAYS; ?> Days)'
-                }
+            {
+                label: 'DC Current (A)',
+                data: <?php echo json_encode($dc_current); ?>,
+                borderColor: 'purple',
+                backgroundColor: 'rgba(128, 0, 128, 0.1)',
+                borderWidth: 1.5,
+                pointRadius: 0
             }
-        });
+        ]
+    },
+    options: {
+        responsive: true,
+        scales: {
+            xAxes: [{
+                type: 'time',
+                time: {
+                    unit: 'hour',
+                    displayFormats: {
+                        hour: 'MMM D HH:mm'
+                    }
+                },
+                scaleLabel: {
+                    display: true,
+                    labelString: 'Time'
+                }
+            }],
+            yAxes: [{
+                scaleLabel: {
+                    display: true,
+                    labelString: 'Current (A)'
+                },
+                ticks: {
+                    min: 0,
+                    max: 50,
+                    stepSize: 10,
+                    callback: function(value) {
+                        return value + ' A';
+                    }
+                },
+                afterBuildTicks: function(scale) {
+                    scale.max = 100;
+                    scale.min = 0;
+                }
+            }]
+        },
+        title: {
+            display: true,
+            text: 'Current Measurements (Last <?php echo $PLOT_DAYS; ?> Days)'
+        }
+    }
+});
         
         // Voltage Chart
         var voltageCtx = document.getElementById('voltageChart').getContext('2d');
