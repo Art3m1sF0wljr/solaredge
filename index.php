@@ -1,4 +1,6 @@
+
 <?php
+
 
 
 // Configuration
@@ -37,8 +39,8 @@ function parse_log_file($filename) {
                 'dc_power' => $dc_power,
                 'state' => $state,
                 'energy' => $energy,
-                'ac_' => $ac_,
-                'dc_' => $dc_,
+                'ac_current' => $ac_current,
+                'dc_current' => $dc_current,
                 'ac_voltage' => $ac_voltage,
                 'temp_sink' => $temp_sink
             );
@@ -121,8 +123,8 @@ $ac_power = array();
 $dc_power = array();
 $power_from_energy = array();
 $power_from_energy_smoothed = array();
-$ac_ = array();
-$dc_ = array();
+$ac_current = array();
+$dc_current = array();
 $ac_voltage = array();
 $temp_sink = array();
 
@@ -132,8 +134,8 @@ foreach ($processed_data as $item) {
     $dc_power[] = min($item['dc_power'] / 1000, 5); // Clip to 5kW max
     $power_from_energy[] = min(isset($item['power_from_energy']) ? $item['power_from_energy'] / 1000 : 0, 5);
     $power_from_energy_smoothed[] = min(isset($item['power_from_energy_smoothed']) ? $item['power_from_energy_smoothed'] / 1000 : 0, 5);
-    $ac_[] = $item['ac_'];
-    $dc_[] = $item['dc_'];
+    $ac_current[] = $item['ac_current'];
+    $dc_current[] = $item['dc_current'];
     $ac_voltage[] = $item['ac_voltage'];
     $temp_sink[] = $item['temp_sink'];
 }
@@ -194,7 +196,7 @@ foreach ($processed_data as $item) {
         <canvas id="energyDerivativeChart"></canvas>
     </div>
     <div class="chart-container">
-        <canvas id="Chart"></canvas>
+        <canvas id="currentChart"></canvas>
     </div>
     
     <div class="chart-container">
@@ -346,7 +348,7 @@ foreach ($processed_data as $item) {
                 }
             }
         });
-        // Current Chart
+                // Current Chart
 var currentCtx = document.getElementById('currentChart').getContext('2d');
 var currentChart = new Chart(currentCtx, {
     type: 'line',
@@ -401,7 +403,7 @@ var currentChart = new Chart(currentCtx, {
                     }
                 },
                 afterBuildTicks: function(scale) {
-                    scale.max = 100;
+                    scale.max = 50;
                     scale.min = 0;
                 }
             }]
