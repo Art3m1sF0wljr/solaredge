@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import io
 import logging
+import subprocess
 
 # Setup logging
 logging.basicConfig(
@@ -23,6 +24,17 @@ FTP_PASS = os.getenv('FTP_PASS')
 REMOTE_PATH = '/solaredge/'  # Change this to your desired remote path
 UPLOAD_INTERVAL = 600  # 10 minutes in seconds
 DAYS_TO_KEEP = 3  # Number of days to keep in the uploaded file
+MAX_UPLOAD_FAILURE_TIME = 1800  # 30 minutes in seconds (time after which to reboot)
+
+# Track last successful upload
+last_successful_upload = time.time()
+
+def reboot_device():
+    logging.warning("No successful uploads in 30 minutes. Rebooting device...")
+    try:
+        subprocess.run(['sudo', 'reboot'], check=True)
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Failed to reboot device: {e}")
 
 # Function to filter and keep only the last 3 days of data
 def filter_last_days(log_content):
@@ -61,6 +73,8 @@ def connect_ftps():
 
 # Function to upload the filtered log file
 def upload_log_file():
+    global last_successful_upload
+    
     # Read the local log file
     try:
         with open(LOG_FILE, 'r') as f:
@@ -92,7 +106,8 @@ def upload_log_file():
         # Upload the filtered content
         remote_filename = f"solar_edge_data.log"
         ftps.storbinary(f'STOR {remote_filename}', io.BytesIO(filtered_content.encode('utf-8')))
-        logging.info(f"Successfully uploaded {remote_filename} with {filtered_content.count('\n')} lines")
+        logging.info(f"Successfully uploaded {remote_filename} with some lines")
+        last_successful_upload = time.time()  # Update last successful upload time
         return True
 
     except ftplib.all_errors as e:
@@ -111,8 +126,18 @@ if __name__ == "__main__":
     
     while True:
         try:
-            upload_log_file()
+            success = upload_log_file()
+            
+            # Check if it's been too long since last successful upload
+            time_since_last_success = time.time() - last_successful_upload
+            if time_since_last_success > MAX_UPLOAD_FAILURE_TIME:
+                reboot_device()
+                
         except Exception as e:
             logging.error(f"Unexpected error in main loop: {e}")
+            # Also check time since last success in case of exception
+            time_since_last_success = time.time() - last_successful_upload
+            if time_since_last_success > MAX_UPLOAD_FAILURE_TIME:
+                reboot_device()
         
         time.sleep(UPLOAD_INTERVAL)
