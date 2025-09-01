@@ -1,0 +1,14 @@
+# /etc/systemd/system/solaredge-uploader.service
+[Unit]
+Description=SolarEdge Log Uploader
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3 /home/pi/program/solaredge/uploader.py
+WorkingDirectory=/home/pi/program/solaredge
+Restart=always
+RestartSec=10
+User=pi
+
+[Install]
+WantedBy=multi-user.target
