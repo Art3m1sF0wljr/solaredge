@@ -265,7 +265,7 @@ def format_value(name, value, unit=None):
     elif 'Frequency' in name:
         return f"{value:.3f} Hz"
     elif 'Temp' in name:
-        return f"{value:.1f} °C"
+        return f"{value:.1f} Â°C"
     elif unit:
         return f"{value} {unit}"
     return f"{value:.3f}"
@@ -273,16 +273,27 @@ def format_value(name, value, unit=None):
 def save_to_database(data):
     """Append data to the database text file with improved formatting"""
     try:
+        # Safely format all values, handling None cases
+        timestamp = data.get('timestamp', 'N/A')
+        ac_power = data.get('ac_power', 0.0) or 0.0
+        dc_power = data.get('dc_power', 0.0) or 0.0
+        state = data.get('state', 'Unknown')
+        energy = data.get('energy', 0.0) or 0.0
+        ac_current = data.get('ac_current', 0.0) or 0.0
+        dc_current = data.get('dc_current', 0.0) or 0.0
+        ac_voltage = data.get('ac_voltage', 0.0) or 0.0
+        temp_sink = data.get('temp_sink', 0.0) or 0.0
+        
         with open(DB_FILE, 'a') as f:
-            f.write(f"{data['timestamp']}, "
-                    f"AC Power: {data['ac_power']:.1f} W, "
-                    f"DC Power: {data['dc_power']:.1f} W, "
-                    f"State: {data['state']}, "
-                    f"Energy: {data['energy']:.6f} MWh, "
-                    f"AC Current: {data['ac_current']:.3f} A, "
-                    f"DC Current: {data['dc_current']:.3f} A, "
-                    f"AC Voltage: {data['ac_voltage']:.2f} V, "
-                    f"Heat Sink Temp: {data['temp_sink']:.1f} °C\n")
+            f.write(f"{timestamp}, "
+                    f"AC Power: {ac_power:.1f} W, "
+                    f"DC Power: {dc_power:.1f} W, "
+                    f"State: {state}, "  # No formatting on string
+                    f"Energy: {energy:.6f} MWh, "
+                    f"AC Current: {ac_current:.3f} A, "
+                    f"DC Current: {dc_current:.3f} A, "
+                    f"AC Voltage: {ac_voltage:.2f} V, "
+                    f"Heat Sink Temp: {temp_sink:.1f} Â°C\n")
     except Exception as e:
         print(f"Error saving to database: {str(e)}")
 
